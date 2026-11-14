@@ -1,0 +1,54 @@
+{
+  "datasetId": "synthetic-iq-sales-v1",
+  "classification": "synthetic-demo",
+  "simulatedAsOf": "2026-10-30",
+  "provenance": "Authored synthetic demonstration data, not live CRM, customer evidence, verified product documentation or a current-market claim.",
+  "currency": "USD",
+  "fiscalConvention": "Fiscal year ends June; FY26/Q4=Apr-Jun 2026; FY27/Q1=Jul-Sep 2026; pipeline FY27/Q2=Oct-Dec 2026.",
+  "counts": {
+    "territories": 6,
+    "capabilities": 6,
+    "accounts": 18,
+    "salesPerformance": 72,
+    "opportunities": 36,
+    "documents": 12
+  },
+  "relationships": [
+    {
+      "from": "sales_performance.territoryId",
+      "to": "territories.territoryId",
+      "cardinality": "many-to-one"
+    },
+    {
+      "from": "accounts.territoryId",
+      "to": "territories.territoryId",
+      "cardinality": "many-to-one"
+    },
+    {
+      "from": "opportunities.accountId",
+      "to": "accounts.accountId",
+      "cardinality": "many-to-one"
+    },
+    {
+      "from": "opportunities.capabilityId",
+      "to": "capabilities.capabilityId",
+      "cardinality": "many-to-one"
+    }
+  ],
+  "limitations": [
+    "Synthetic, not live CRM or independently verified product claims.",
+    "No account-level recognized revenue allocation.",
+    "No live source is changed by local generation.",
+    "Imported semantic models need a separate explicit load/refresh and data-agent binding.",
+    "Original source records, dates and fiscal labels are not changed."
+  ],
+  "sha256": {
+    "dataset.json": "4880ffb730e3d4c4805f3b6eb0cdfa384002959cb71bf75e126442c77aa10131",
+    "search-documents.json": "d78bd41ae10d86b2087eedd58da80bd5d3b63d17f8167b1abdcf67e3ca1c1157",
+    "territories.csv": "d0963cba40c0527c6ec7d3221c5c3338febb10c39c8803665297af4fd06ab693",
+    "capabilities.csv": "6dcfa8dec585488ad9aedcb15ef28b79528d1893d8a3d26689d4a7520c88ed91",
+    "accounts.csv": "ec279fd59e611bb8bceee9f10943a6d3b0d91372fa0b66e01e4a79acbf47f3d3",
+    "sales_performance.csv": "b9600dafee8ac9fa4e9af8e730d68169646007b247e9d4a20c45b2292241fb60",
+    "opportunities.csv": "526b8dbb525e265ca93e604147d5039f4b480abcf710f3d86b243c70672a2d14"
+  }
+}

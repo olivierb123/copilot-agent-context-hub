@@ -1,0 +1,110 @@
+[
+  {
+    "id": "SYN-IQ-V1-DOC-01",
+    "docId": "SYN-IQ-V1-DOC-01",
+    "title": "[Synthetic demo] Crew dispatch discovery and evaluation guide",
+    "type": "technical",
+    "audience": "Demo sellers and technical evaluators",
+    "lastUpdated": "2026-10-30",
+    "content": "Authored synthetic demonstration data, not live CRM, customer evidence, verified product documentation or a current-market claim.\nDataset: synthetic-iq-sales-v1. Fixed simulated as-of: 2026-10-30. This document date is fixture metadata, not verified publication freshness.\nCapability: crew-dispatch.\n\nSimulated available capability: assign a crew to a job, record acceptance, and expose an office handoff. Demonstrate using synthetic crew records; do not promise an autonomous dispatcher or external writes. Qualify how dispatchers handle reassignment, missing acknowledgements and offline field updates. A sample evaluation measures unacknowledged assignments before and after a two-week pilot. The pilot target is a proposed success criterion, not a measured improvement. Ask the buyer to supply a baseline; no customer savings or ROI study exists in this dataset."
+  },
+  {
+    "id": "SYN-IQ-V1-DOC-02",
+    "docId": "SYN-IQ-V1-DOC-02",
+    "title": "[Synthetic demo] Field-to-CRM sales handoff playbook",
+    "type": "sales",
+    "audience": "Demo sellers and technical evaluators",
+    "lastUpdated": "2026-10-30",
+    "content": "Authored synthetic demonstration data, not live CRM, customer evidence, verified product documentation or a current-market claim.\nDataset: synthetic-iq-sales-v1. Fixed simulated as-of: 2026-10-30. This document date is fixture metadata, not verified publication freshness.\nCapability: field-to-crm.\n\nSimulated available capability: prepare a reviewable opportunity handoff from field observations. Preserve account, territory, source record and owner; deduplicate before a seller approves a CRM write. This demo agent cannot write to CRM. Discovery should identify the current handoff owner, required fields and duplicate-handling process. For buyers concerned about missed follow-up, propose an acceptance checklist and an owner-reviewed pilot rather than a guaranteed revenue uplift. Never imply that a permit signal proves purchase intent."
+  },
+  {
+    "id": "SYN-IQ-V1-DOC-03",
+    "docId": "SYN-IQ-V1-DOC-03",
+    "title": "[Synthetic demo] Permit-signal coverage and qualification limits",
+    "type": "technical",
+    "audience": "Demo sellers and technical evaluators",
+    "lastUpdated": "2026-10-30",
+    "content": "Authored synthetic demonstration data, not live CRM, customer evidence, verified product documentation or a current-market claim.\nDataset: synthetic-iq-sales-v1. Fixed simulated as-of: 2026-10-30. This document date is fixture metadata, not verified publication freshness.\nCapability: permit-signals.\n\nSimulated limited preview: a permit feed can generate research candidates only after jurisdiction, project type, record age and licensing rights are checked. No live permit feed, county coverage matrix or current permit is included in this pack. Use permit-triggered research as a discovery scenario, not evidence that a specific account has a new project. Roadmap expansion is not released coverage. Ask a buyer which jurisdictions and permitted record types are essential before proposing a preview evaluation."
+  },
+  {
+    "id": "SYN-IQ-V1-DOC-04",
+    "docId": "SYN-IQ-V1-DOC-04",
+    "title": "[Synthetic demo] Multi-site rollout pilot plan",
+    "type": "sales",
+    "audience": "Demo sellers and technical evaluators",
+    "lastUpdated": "2026-10-30",
+    "content": "Authored synthetic demonstration data, not live CRM, customer evidence, verified product documentation or a current-market claim.\nDataset: synthetic-iq-sales-v1. Fixed simulated as-of: 2026-10-30. This document date is fixture metadata, not verified publication freshness.\nCapability: multisite-rollout.\n\nSimulated available capability: define a site-by-site adoption plan with local dispatch owners and a central sponsor. A proposed four-week evaluation uses two synthetic sites, an owner approval gate and a rollback checklist. Compare assignment completeness and handoff timeliness against a buyer-supplied baseline. Enterprise opportunities should identify procurement, a site champion, integration ownership and rollout dependencies. Do not equate territory-level sales performance with an individual account adoption result."
+  },
+  {
+    "id": "SYN-IQ-V1-DOC-05",
+    "docId": "SYN-IQ-V1-DOC-05",
+    "title": "[Synthetic demo] Integration and security discovery checklist",
+    "type": "technical",
+    "audience": "Demo sellers and technical evaluators",
+    "lastUpdated": "2026-10-30",
+    "content": "Authored synthetic demonstration data, not live CRM, customer evidence, verified product documentation or a current-market claim.\nDataset: synthetic-iq-sales-v1. Fixed simulated as-of: 2026-10-30. This document date is fixture metadata, not verified publication freshness.\nCapability: integration-security.\n\nSimulated design guidance, not a security certification or deployed integration. For Dynamics 365 and Microsoft Graph, establish delegated scopes, least privilege, tenant consent, retention, data residency and audit requirements before proposing implementation. The demo has no live CRM, mailbox or Teams access. Ask for the system owner and a test tenant. Do not promise specific compliance certifications, production service levels, automatic provisioning or cross-tenant access. A missing security requirement is a discovery blocker, not evidence of compliance."
+  },
+  {
+    "id": "SYN-IQ-V1-DOC-06",
+    "docId": "SYN-IQ-V1-DOC-06",
+    "title": "[Synthetic demo] Weather-aware scheduling roadmap and limitations",
+    "type": "roadmap",
+    "audience": "Demo sellers and technical evaluators",
+    "lastUpdated": "2026-10-30",
+    "content": "Authored synthetic demonstration data, not live CRM, customer evidence, verified product documentation or a current-market claim.\nDataset: synthetic-iq-sales-v1. Fixed simulated as-of: 2026-10-30. This document date is fixture metadata, not verified publication freshness.\nCapability: weather-scheduling.\n\nSIMULATED ROADMAP ONLY; NOT AVAILABLE. Climate-risk-aware scheduling and additional jurisdiction coverage are exploratory ideas with no committed date. Weather guidance in the harness comes from separately retrieved public sources, not this document. Do not infer a current warning from historical storm records, and never send private opportunity or customer data to public web tools. If an opportunity requires automatic weather scheduling as a condition of purchase, flag a product-fit gap and do not recommend selling an unreleased feature."
+  },
+  {
+    "id": "SYN-IQ-V1-DOC-07",
+    "docId": "SYN-IQ-V1-DOC-07",
+    "title": "[Synthetic demo] Competitive evaluation against Procore: evidence policy",
+    "type": "sales",
+    "audience": "Demo sellers and technical evaluators",
+    "lastUpdated": "2026-10-30",
+    "content": "Authored synthetic demonstration data, not live CRM, customer evidence, verified product documentation or a current-market claim.\nDataset: synthetic-iq-sales-v1. Fixed simulated as-of: 2026-10-30. This document date is fixture metadata, not verified publication freshness.\nCapability: crew-dispatch.\n\nThis authored scenario is a discovery guide, not an independently verified competitor benchmark. For opportunities naming Procore, establish whether the buyer wants field dispatch and CRM handoff or a broader project-management suite. Demonstrate the specific FieldForge workflow using this pack and ask the buyer to assess it against its existing workflow. No current Procore pricing, feature gaps, performance results or contract terms are provided. Do not claim that a competitor lacks a capability without separate current evidence. Cite the dispatch, handoff and rollout guides for the proposed FieldForge evaluation."
+  },
+  {
+    "id": "SYN-IQ-V1-DOC-08",
+    "docId": "SYN-IQ-V1-DOC-08",
+    "title": "[Synthetic demo] Pipeline prioritization and forecast definitions",
+    "type": "operations",
+    "audience": "Demo sellers and technical evaluators",
+    "lastUpdated": "2026-10-30",
+    "content": "Authored synthetic demonstration data, not live CRM, customer evidence, verified product documentation or a current-market claim.\nDataset: synthetic-iq-sales-v1. Fixed simulated as-of: 2026-10-30. This document date is fixture metadata, not verified publication freshness.\nCapability: field-to-crm.\n\nOpportunity amounts are synthetic USD potential contract values, not recognized revenue. Stage probabilities are authored planning assumptions: Qualification 10%, Discovery 25%, Proposal 50%, Negotiation 75%, Closed Won 100%, Closed Lost 0%. Weighted pipeline is amount times probability, not a committed forecast. Exclude both closed stages from open-pipeline coverage. Coverage is open pipeline divided by the positive closed-quarter quota gap, a scenario comparison across periods rather than a same-quarter forecast. Do not add pipeline amounts to booked sales. Dates and next steps are authored scenario facts, not actual customer commitments."
+  },
+  {
+    "id": "SYN-IQ-V1-DOC-09",
+    "docId": "SYN-IQ-V1-DOC-09",
+    "title": "[Synthetic demo] Sales performance grain and fiscal-period definitions",
+    "type": "operations",
+    "audience": "Demo sellers and technical evaluators",
+    "lastUpdated": "2026-10-30",
+    "content": "Authored synthetic demonstration data, not live CRM, customer evidence, verified product documentation or a current-market claim.\nDataset: synthetic-iq-sales-v1. Fixed simulated as-of: 2026-10-30. This document date is fixture metadata, not verified publication freshness.\nCapability: multisite-rollout.\n\nSales grain is one row per month, territory and segment, with one seller per territory/segment. SUM revenue and SUM quota across matching rows, then calculate attainment as revenue divided by quota. Do not average row attainment percentages or sum quota after joining to multiple accounts/opportunities. Fiscal years end in June: April-June 2026 is FY26/Q4; July-September 2026 is FY27/Q1. These labels belong only to synthetic-iq-sales-v1 and do not reinterpret the original five-row imported demo. Sales periods are closed months; future close dates describe pipeline, not future booked revenue."
+  },
+  {
+    "id": "SYN-IQ-V1-DOC-10",
+    "docId": "SYN-IQ-V1-DOC-10",
+    "title": "[Synthetic demo] Buyer objections and next-step qualification",
+    "type": "sales",
+    "audience": "Demo sellers and technical evaluators",
+    "lastUpdated": "2026-10-30",
+    "content": "Authored synthetic demonstration data, not live CRM, customer evidence, verified product documentation or a current-market claim.\nDataset: synthetic-iq-sales-v1. Fixed simulated as-of: 2026-10-30. This document date is fixture metadata, not verified publication freshness.\nCapability: integration-security.\n\nSynthetic opportunity objections include unclear pilot ownership, procurement timing, duplicate CRM entries and unverified integration requirements. A buyer objection is an authored account scenario, not proof of a product defect or competitor weakness. Respond with the relevant discovery checklist, an accountable owner and a measurable proposed evaluation. Avoid generic advice: identify the opportunity ID, stage, amount, recorded need, blocker and next action, then cite the document that supports the proposed capability. Do not infer purchase readiness from a territory shortfall alone."
+  },
+  {
+    "id": "SYN-IQ-V1-DOC-11",
+    "docId": "SYN-IQ-V1-DOC-11",
+    "title": "[Synthetic demo] Synthetic dataset provenance and account relationships",
+    "type": "governance",
+    "audience": "Demo sellers and technical evaluators",
+    "lastUpdated": "2026-10-30",
+    "content": "Authored synthetic demonstration data, not live CRM, customer evidence, verified product documentation or a current-market claim.\nDataset: synthetic-iq-sales-v1. Fixed simulated as-of: 2026-10-30. This document date is fixture metadata, not verified publication freshness.\nCapability: field-to-crm.\n\nAll account names, opportunities, recorded objections, product guidance and amounts in synthetic-iq-sales-v1 are authored fictional examples. Any resemblance to real organizations is coincidental. The fixed simulated as-of date is 2026-10-30; it is not a last verified customer contact or source-freshness claim. Join opportunities to accounts using accountId. Join accounts and sales_performance to the territories dimension using territoryId, but aggregate sales before comparing to account pipeline. There is no account-level sales allocation or causal proof that closing an opportunity would repair historical quota performance. Never use these records as live CRM evidence."
+  },
+  {
+    "id": "SYN-IQ-V1-DOC-12",
+    "docId": "SYN-IQ-V1-DOC-12",
+    "title": "[Synthetic demo] Evidence-backed territory brief template",
+    "type": "sales",
+    "audience": "Demo sellers and technical evaluators",
+    "lastUpdated": "2026-10-30",
+    "content": "Authored synthetic demonstration data, not live CRM, customer evidence, verified product documentation or a current-market claim.\nDataset: synthetic-iq-sales-v1. Fixed simulated as-of: 2026-10-30. This document date is fixture metadata, not verified publication freshness.\nCapability: multisite-rollout.\n\nFor a synthetic territory brief, state the dataset/version and simulated as-of date. Present revenue, quota, positive deficit and attainment for the explicitly requested closed fiscal period. Separately show current open opportunities with IDs, values, stages, close dates and blockers. Tie recommendations to recorded buyer needs and cited capability documents, distinguish roadmap from available features, and name missing evidence. The harness can save and revise a brief only when requested. A tool failure or absent opportunity table must remain explicit rather than filled with invented account facts."
+  }
+]

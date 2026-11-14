@@ -1,0 +1,12 @@
+{
+  "folders": [{ "path": "." }],
+  "settings": {
+    "files.exclude": {
+      "**/node_modules": true,
+      "**/dist": true,
+      "**/.azure": true,
+      "**/.foundry": true,
+      "**/.state": true
+    }
+  }
+}

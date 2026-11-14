@@ -1,0 +1,7 @@
+"territoryId","territory","datasetId","classification","simulatedAsOf","provenance"
+"SYN-TERR-1","West","synthetic-iq-sales-v1","synthetic-demo","2026-10-30","Authored synthetic demonstration data, not live CRM, customer evidence, verified product documentation or a current-market claim."
+"SYN-TERR-2","Central","synthetic-iq-sales-v1","synthetic-demo","2026-10-30","Authored synthetic demonstration data, not live CRM, customer evidence, verified product documentation or a current-market claim."
+"SYN-TERR-3","South","synthetic-iq-sales-v1","synthetic-demo","2026-10-30","Authored synthetic demonstration data, not live CRM, customer evidence, verified product documentation or a current-market claim."
+"SYN-TERR-4","Northeast","synthetic-iq-sales-v1","synthetic-demo","2026-10-30","Authored synthetic demonstration data, not live CRM, customer evidence, verified product documentation or a current-market claim."
+"SYN-TERR-5","Southeast","synthetic-iq-sales-v1","synthetic-demo","2026-10-30","Authored synthetic demonstration data, not live CRM, customer evidence, verified product documentation or a current-market claim."
+"SYN-TERR-6","Northwest","synthetic-iq-sales-v1","synthetic-demo","2026-10-30","Authored synthetic demonstration data, not live CRM, customer evidence, verified product documentation or a current-market claim."
