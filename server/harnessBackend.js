@@ -1,9 +1,68 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { AIProjectClient } from '@azure/ai-projects'
 import { DefaultAzureCredential } from '@azure/identity'
 import { createRemoteJWKSet, jwtVerify } from 'jose'
-import { assertHarnessTurnOptions, createSnapshotConversation, runHarnessTurn } from './harnessRuntime.js'
+import { assertHarnessTurnOptions, captureCompletedWork, createSnapshotConversation, hasExportSecrets, inheritedIndexWasRead, runHarnessTurn } from './harnessRuntime.js'
+
+function freezeSnapshot(value) {
+  if (value && typeof value === 'object') {
+    Object.values(value).forEach(freezeSnapshot)
+    Object.freeze(value)
+  }
+  return value
+}
+
+function publishedArtifacts(session) {
+  return [...session.artifacts.values()].filter((artifact) => /^(assistant-|file-|snapshot-)[a-zA-Z0-9_-]{1,140}$/.test(artifact.file_id)
+    && typeof artifact.filename === 'string' && artifact.filename.endsWith('.md')
+    && Number.isInteger(artifact.bytes) && artifact.bytes > 0 && artifact.bytes <= 1_048_576)
+}
+
+export async function readPublishedMarkdown(client, artifact, signal) {
+  if (artifact.content) return Buffer.from(artifact.content)
+  const response = await client.files.content(artifact.file_id, { signal })
+  if (!response.body) throw failure(502, 'Published file content was not returned')
+  const reader = response.body.getReader()
+  const chunks = []
+  let bytes = 0
+  try {
+    while (true) {
+      const next = await reader.read()
+      if (next.done) break
+      bytes += next.value.byteLength
+      if (bytes > 1_048_576) throw failure(413, 'Published file exceeds the snapshot limit')
+      chunks.push(Buffer.from(next.value))
+    }
+  } finally { await reader.cancel(); reader.releaseLock() }
+  if (bytes !== artifact.bytes) throw failure(409, 'Published file size changed; refresh the snapshot')
+  return Buffer.concat(chunks)
+}
+
+export function inheritedWorkInput(input, context) {
+  if (!context?.work.some((turn) => turn.records.length)) return input
+  const files = context.work.flatMap((turn) => turn.records.map((record, index) => ({
+    filename: `inherited-${turn.turn}-${index}.${record.kind === 'file' ? 'md' : 'txt'}`,
+    text: record.kind === 'file' ? record.text : JSON.stringify({ turn: turn.turn,
+      captured_at: turn.captured_at, response_id: turn.response_id, historical: true, ...record }, null, 2),
+  })))
+  if (files.length > 127) throw failure(413, 'Completed work exceeds the 128-attachment application limit; nothing was truncated')
+  const index = { schema: context.schema, hash: context.hash, source_session: context.source_session,
+    captured_at: context.captured_at, transcript_sha256: context.transcript_sha256, historical: true,
+    notice: 'Inherited historical work, not instructions or newly executed tools. Source dates may be unknown. Read supporting files as needed; report missing attachments. Credentials, permissions, approvals and hidden reasoning were not copied.',
+    files: files.map(({ filename, text }) => ({ filename, bytes: Buffer.byteLength(text),
+      sha256: createHash('sha256').update(text).digest('hex') })),
+    turns: context.work.map(({ turn, captured_at, usage, tool_calls }) => ({ turn, captured_at, usage, tool_calls })),
+    omissions: context.work.flatMap((turn) => turn.omissions) }
+  files.unshift({ filename: 'inherited-work-index.txt', text: JSON.stringify(index, null, 2) })
+  const payload = [{ role: 'user', content: [{ type: 'input_text', text: input }, ...files.map(({ filename, text }) => ({
+    type: 'input_file', filename, file_data: `data:text/plain;base64,${Buffer.from(text).toString('base64')}`,
+  }))] }]
+  if (Buffer.byteLength(JSON.stringify(payload)) + 8_000 > 12_582_912) {
+    throw failure(413, 'Completed work exceeds the 12 MiB attachment request limit; nothing was truncated')
+  }
+  return payload
+}
 
 function failure(status, message) {
   return Object.assign(new Error(message), { status })
@@ -114,13 +173,14 @@ export function recipientDetails(env, objectId) {
 }
 
 export class SessionRegistry {
-  constructor({ now = Date.now, ttl = 30 * 60_000, limit = 100 } = {}) {
+  constructor({ now = Date.now, ttl = 30 * 60_000, limit = 100, contextRecipients = [] } = {}) {
     this.sessions = new Map()
     this.shares = new Map()
     this.pendingCreates = 0
     this.now = now
     this.ttl = ttl
     this.limit = limit
+    this.contextRecipients = new Set(contextRecipients)
   }
 
   find(id, principal) {
@@ -144,7 +204,7 @@ export class SessionRegistry {
       try {
         const conversation = await createConversation()
         session = { id: randomUUID(), conversation: conversation.id, principal,
-          expires: this.now() + this.ttl, busy: false, artifacts: new Map(), messages: [] }
+          expires: this.now() + this.ttl, busy: false, artifacts: new Map(), messages: [], work: [] }
         this.sessions.set(session.id, session)
       } finally { this.pendingCreates -= 1 }
     }
@@ -159,10 +219,36 @@ export class SessionRegistry {
       .map((item) => item.content.filter((part) => part.type === 'output_text').map((part) => part.text).join(''))
       .join('\n\n')
     if (!text) throw failure(502, 'The completed response contains no shareable assistant text')
+    const work = captureCompletedWork(response)
+    const turn = { turn: session.messages.length / 2 + 1, response_id: response.id,
+      captured_at: new Date(this.now()).toISOString(), ...work }
+    if (Buffer.byteLength(JSON.stringify([...session.work, turn])) > 8_388_608) {
+      turn.records = []
+      turn.omissions.push({ reason: 'session_capture_limit', blocking: true })
+    }
+    session.work.push(freezeSnapshot(turn))
     session.messages.push({ role: 'user', content: input }, { role: 'assistant', content: text })
   }
 
-  createShare(id, principal, recipient) {
+  contextPreview(id, principal) {
+    const session = this.find(id, principal)
+    const files = publishedArtifacts(session).map(({ file_id, filename, bytes }) => ({ file_id, filename, bytes }))
+    return { version: createHash('sha256').update(JSON.stringify({ messages: session.messages, work: session.work, files })).digest('hex'),
+      records: session.work.reduce((count, turn) => count + turn.records.length, 0),
+      items: session.work.flatMap((turn) => turn.records.map((record) => ({ turn: turn.turn, kind: record.kind,
+        title: record.filename || record.title || record.tool || record.kind, status: record.status || 'returned' }))),
+      files: files.map(({ filename, bytes }) => ({ filename, bytes })),
+      omissions: session.work.flatMap((turn) => turn.omissions), work: session.work, messages: session.messages }
+  }
+
+  assertContextRecipient(work, recipient, hasFiles = false) {
+    if ((hasFiles || work.some((turn) => turn.records.some((record) => record.kind !== 'citation')))
+      && !this.contextRecipients.has(recipient)) {
+      throw failure(403, 'Recipient source-export entitlement is not configured; review HARNESS_CONTEXT_EXPORT_OBJECT_IDS before sharing completed work')
+    }
+  }
+
+  createShare(id, principal, recipient, files = []) {
     const session = this.find(id, principal)
     if (!recipient || recipient === principal) throw failure(400, 'Choose a different recipient')
     if (!session.messages.length) throw failure(409, 'Complete a conversation turn before sharing')
@@ -171,16 +257,51 @@ export class SessionRegistry {
     }
     if (this.shares.size >= this.limit * 2) throw failure(503, 'Local share limit reached')
     if (Buffer.byteLength(JSON.stringify(session.messages)) > 262_144) throw failure(413, 'Conversation exceeds the snapshot limit')
+    if (session.work.some((turn) => turn.omissions.some((entry) => entry.blocking))) {
+      throw failure(413, 'Completed work exceeds capture limits; a partial fork will not be created')
+    }
+    this.assertContextRecipient(session.work, recipient, publishedArtifacts(session).length > 0)
+    if (publishedArtifacts(session).some((artifact) => !files.some((file) => file.source_id === artifact.file_id))) {
+      throw failure(409, 'Published file bytes have not been snapshotted; a partial fork will not be created')
+    }
+    if (files.some((file) => !publishedArtifacts(session).some((artifact) => artifact.file_id === file.source_id
+      && artifact.filename === file.filename && artifact.bytes === file.bytes)
+      || typeof file.text !== 'string' || Buffer.byteLength(file.text) !== file.bytes
+      || createHash('sha256').update(file.text).digest('hex') !== file.sha256)) {
+      throw failure(409, 'Published file snapshot does not match its registered bytes and hash')
+    }
+    const captured_at = new Date(this.now()).toISOString()
+    const content = { schema: 'completed_work_v1', source_session: id, captured_at,
+      transcript_sha256: createHash('sha256').update(JSON.stringify(session.messages)).digest('hex'),
+      work: structuredClone(session.work) }
+    for (const file of files) {
+      if (!content.work.some((turn) => turn.records.some((record) => record.verified_bytes && record.sha256 === file.sha256 && record.filename === file.filename))) {
+        content.work.at(-1).records.push({ kind: 'file', origin: 'published_artifact', verified_bytes: true,
+          filename: file.filename, bytes: file.bytes, sha256: file.sha256, text: file.text, status: 'returned' })
+      }
+    }
+    if (hasExportSecrets(JSON.stringify(content)) || hasExportSecrets(JSON.stringify(session.messages))) {
+      throw failure(403, 'Snapshot contains credential-like content; export is blocked without automatic redaction')
+    }
+    if (Buffer.byteLength(JSON.stringify(content)) > 8_388_608) throw failure(413, 'Completed work exceeds the snapshot limit; nothing was truncated')
+    const context = freezeSnapshot({ ...content, hash: createHash('sha256').update(JSON.stringify(content)).digest('hex') })
+    inheritedWorkInput('', context)
     const share = { id: randomUUID(), sessionId: id, owner: principal, recipient,
       created: this.now(), expires: Math.min(session.expires, this.now() + this.ttl), pending: false,
-      messages: Object.freeze(session.messages.map((message) => Object.freeze({ ...message }))) }
+      messages: Object.freeze(session.messages.map((message) => Object.freeze({ ...message }))), context }
     this.shares.set(share.id, share)
     return this.shareDetails(share)
   }
 
   shareDetails(share) {
     return { id: share.id, owner: share.owner, recipient: share.recipient, created: share.created,
-      expires: share.expires, turns: share.messages.length / 2, mode: 'message_snapshot' }
+      expires: share.expires, turns: share.messages.length / 2, mode: 'completed_work_snapshot',
+      context: { schema: share.context.schema, hash: share.context.hash,
+        records: share.context.work.reduce((count, turn) => count + turn.records.length, 0),
+        items: share.context.work.flatMap((turn) => turn.records.map((record) => ({ turn: turn.turn,
+          kind: record.kind, title: record.filename || record.title || record.tool || record.kind,
+          status: record.status || 'returned' }))),
+        omissions: share.context.work.flatMap((turn) => turn.omissions) } }
   }
 
   getShare(id, principal, owner = false) {
@@ -206,6 +327,7 @@ export class SessionRegistry {
 
   async acceptShare(id, principal, createConversation, deleteConversation) {
     const share = this.getShare(id, principal)
+    this.assertContextRecipient(share.context.work, principal)
     if (share.pending) throw failure(409, 'This share is already being accepted')
     share.pending = true
     let fork
@@ -216,7 +338,18 @@ export class SessionRegistry {
         return conversation
       })
       this.getShare(id, principal)
+      this.assertContextRecipient(share.context.work, principal)
       fork.messages = share.messages.map((message) => ({ ...message }))
+      fork.work = [...share.context.work]
+      fork.inheritedContext = share.context
+      fork.contextPending = share.context.work.some((turn) => turn.records.length)
+      for (const turn of share.context.work) {
+        for (const record of turn.records.filter((entry) => entry.kind === 'file' && entry.verified_bytes)) {
+          const file_id = `snapshot-${randomUUID()}`
+          fork.artifacts.set(file_id, { file_id, filename: record.filename, bytes: record.bytes,
+            sha256: record.sha256, inherited: true, content: Buffer.from(record.text) })
+        }
+      }
       this.release(fork.id, true)
       this.shares.delete(id)
       return fork
@@ -313,7 +446,8 @@ export function harnessBackendPlugin(env) {
   const proofBudget = createProofBudget(env)
   const credential = new DefaultAzureCredential()
   const authenticate = createAuthenticator(env, credential)
-  const sessions = new SessionRegistry()
+  const sessions = new SessionRegistry({ contextRecipients: (env.HARNESS_CONTEXT_EXPORT_OBJECT_IDS || '')
+    .split(',').map((value) => value.trim()).filter(Boolean).map((objectId) => `${env.AZURE_TENANT_ID}:${objectId}`) })
   return {
     name: 'copilot-harness-backend',
     configureServer(server) {
@@ -348,14 +482,37 @@ export function harnessBackendPlugin(env) {
             res.setHeader('Cache-Control', 'no-store')
             res.setHeader('Content-Type', 'application/json')
             if (req.method === 'GET' && path === '/shares') {
+              const sourceId = new URLSearchParams(req.url.split('?')[1]).get('session_id')
               result = { shares: sessions.listShares(identity.principal), recipients: allowed
                 .filter((objectId) => `${env.AZURE_TENANT_ID}:${objectId}` !== identity.principal)
-                .map((objectId) => recipientDetails(env, objectId)) }
+                .map((objectId) => recipientDetails(env, objectId)),
+                ...(sourceId ? { context: sessions.contextPreview(sourceId, identity.principal) } : {}) }
             } else if (req.method === 'POST' && shareSessionId) {
               const body = await readBody(req)
               if (!allowed.includes(body.recipient_object_id)) throw failure(403, 'Recipient is not an approved user')
-              result = sessions.createShare(shareSessionId, identity.principal, `${env.AZURE_TENANT_ID}:${body.recipient_object_id}`)
+              if (body.consent_completed_work !== true) throw failure(400, 'Explicit consent to share completed work is required')
+              if (body.context_version !== sessions.contextPreview(shareSessionId, identity.principal).version) throw failure(409, 'Snapshot changed; refresh and review it before sharing')
+              const source = sessions.find(shareSessionId, identity.principal)
+              const recipient = `${env.AZURE_TENANT_ID}:${body.recipient_object_id}`
+              sessions.assertContextRecipient(source.work, recipient, publishedArtifacts(source).length > 0)
+              const filesClient = project.getOpenAIClient({ azureConfig: { allowPreview: true }, timeout: 30_000, maxRetries: 0 })
+              const files = []
+              source.busy = true
+              try {
+                for (const artifact of publishedArtifacts(source)) {
+                  const content = await readPublishedMarkdown(filesClient, artifact, controller.signal)
+                  const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(content)
+                  files.push({ source_id: artifact.file_id, filename: artifact.filename, bytes: content.byteLength,
+                    sha256: createHash('sha256').update(content).digest('hex'), text })
+                }
+                controller.signal.throwIfAborted()
+              } finally { source.busy = false }
+              result = sessions.createShare(shareSessionId, identity.principal, recipient, files)
               res.statusCode = 201
+            } else if (req.method === 'GET' && shareMatch && !shareMatch[2]) {
+              const share = sessions.getShare(shareMatch[1], identity.principal)
+              sessions.assertContextRecipient(share.context.work, identity.principal)
+              result = { ...sessions.shareDetails(share), messages: share.messages, context: share.context }
             } else if (req.method === 'DELETE' && shareMatch && !shareMatch[2]) {
               sessions.revokeShare(shareMatch[1], identity.principal)
               res.statusCode = 204
@@ -363,11 +520,14 @@ export function harnessBackendPlugin(env) {
               return
             } else if (req.method === 'POST' && shareMatch?.[2]) {
               const body = await readBody(req)
-              if (body.accept_snapshot !== true) throw failure(400, 'Explicit acceptance of a message-only snapshot is required')
+              if (body.accept_completed_work !== true) throw failure(400, 'Explicit acceptance of completed work is required')
+              if (body.context_hash !== sessions.getShare(shareMatch[1], identity.principal).context.hash) throw failure(409, 'Review this completed-work snapshot before accepting it')
               const fork = await sessions.acceptShare(shareMatch[1], identity.principal,
                 (messages) => createSnapshotConversation({ client, messages, signal: controller.signal }),
                 (conversation) => client.conversations.delete(conversation, { signal: AbortSignal.timeout(5000) }))
-              result = { session_id: fork.id, mode: 'message_snapshot', messages: fork.messages }
+              result = { session_id: fork.id, mode: 'completed_work_snapshot', messages: fork.messages,
+                context: fork.inheritedContext,
+                artifacts: [...fork.artifacts.values()].map(({ content: _content, ...artifact }) => artifact) }
               res.statusCode = 201
             } else { throw failure(404, 'Unknown sharing route') }
             res.end(JSON.stringify(result))
@@ -377,28 +537,12 @@ export function harnessBackendPlugin(env) {
           if (req.method === 'GET' && filePath) {
             const artifact = sessions.artifact(filePath[1], identity.principal, filePath[2])
             const filesClient = project.getOpenAIClient({ azureConfig: { allowPreview: true }, timeout: 30_000, maxRetries: 0 })
-            const content = await filesClient.files.content(artifact.file_id, { signal: controller.signal })
-            if (!content.body) throw failure(502, 'File content was not returned')
-            const reader = content.body.getReader()
-            const chunks = []
-            let bytes = 0
-            try {
-              while (true) {
-                const next = await reader.read()
-                if (next.done) break
-                bytes += next.value.byteLength
-                if (bytes > 1_048_576) throw failure(413, 'File exceeds the download limit')
-                chunks.push(Buffer.from(next.value))
-              }
-            } finally {
-              await reader.cancel()
-              reader.releaseLock()
-            }
+            const content = await readPublishedMarkdown(filesClient, artifact, controller.signal)
             res.setHeader('Cache-Control', 'no-store')
             res.setHeader('X-Content-Type-Options', 'nosniff')
             res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
             res.setHeader('Content-Disposition', `attachment; filename="${artifact.filename}"`)
-            res.end(Buffer.concat(chunks))
+            res.end(content)
             return
           }
           const deleteId = path?.match(/^\/sessions\/([\da-f-]{36})$/i)?.[1]
@@ -425,10 +569,19 @@ export function harnessBackendPlugin(env) {
           res.setHeader('X-Accel-Buffering', 'no')
           res.flushHeaders()
           emit({ type: 'harness.session', session_id: session.id })
+          const inheritedContext = session.contextPending ? session.inheritedContext : null
+          if (inheritedContext) emit({ type: 'harness.context', status: 'attached_unverified', hash: inheritedContext.hash })
           heartbeat = setInterval(() => { if (!res.destroyed) res.write(': heartbeat\n\n') }, 15_000)
-          await runHarnessTurn({ client, conversation: session.conversation, input: body.input,
+          await runHarnessTurn({ client, conversation: session.conversation, input: inheritedWorkInput(body.input, inheritedContext),
             ...requestLimits, emit, signal: controller.signal, onCompleted: (response) => {
               sessions.complete(session.id, body.input, response)
+              if (inheritedContext) {
+                const verified = inheritedIndexWasRead(response, inheritedContext.hash)
+                emit({ type: 'harness.context', status: verified ? 'index_read' : 'use_unverified', hash: inheritedContext.hash })
+                session.contextPending = false
+              }
+              const completedWork = session.work.at(-1)
+              emit({ type: 'harness.usage', usage: completedWork.usage, tool_calls: completedWork.tool_calls })
               proofBudget.complete({ sessionId: session.id, conversationId: session.conversation,
                 responseId: response.id, responseStatus: response.status, usage: response.usage,
                 outputTypes: response.output.map((item) => item.type),

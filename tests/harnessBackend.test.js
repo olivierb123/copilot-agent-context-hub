@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { assertLoopbackRequest, authorizeCaller, createProofBudget, createTurnDeadline, getTurnTimeoutMs, recipientDetails, SessionRegistry } from '../server/harnessBackend.js'
+import { assertLoopbackRequest, authorizeCaller, createProofBudget, createTurnDeadline, getTurnTimeoutMs, inheritedWorkInput, readPublishedMarkdown, recipientDetails, SessionRegistry } from '../server/harnessBackend.js'
 import { fixtureDocuments, searchDefinitions } from '../scripts/bootstrap_context_hub.mjs'
 
 test('recipient display user IDs never replace authorization object IDs', () => {
@@ -236,6 +237,94 @@ test('message snapshots fix the completed boundary and never transfer files or t
   assert(!JSON.stringify(source.messages).includes('Recipient-only'))
   assert(!JSON.stringify(copied).includes('never-copy'))
   await assert.rejects(registry.acceptShare(share.id, 'bob', () => {}), { status: 404 })
+})
+
+test('completed-work forks freeze source results, files and usage without transferring tool execution or owner IDs', async () => {
+  const registry = new SessionRegistry({ contextRecipients: ['bob'] })
+  const source = await completedSession(registry)
+  await registry.acquire(source.id, 'alice', () => {})
+  registry.complete(source.id, 'Research', { id: 'resp-work', status: 'completed', usage: { input_tokens: 12, output_tokens: 3, total_tokens: 15 }, output: [
+    { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Finished' }] },
+    { type: 'mcp_call', id: 'fabric', name: 'fabric-sales___DataAgent', status: 'completed', output: '[{"type":"text","text":"Exact original dataset"}]' },
+    { type: 'function_call', name: 'view', call_id: 'read', arguments: '{"path":"/private/brief.md"}' },
+    { type: 'function_call_output', call_id: 'read', output: '# Exact draft\n' },
+  ] })
+  registry.release(source.id, true)
+  const share = registry.createShare(source.id, 'alice', 'bob')
+  assert.equal(share.mode, 'completed_work_snapshot')
+  assert.equal(share.context.records, 2)
+  assert.throws(() => { registry.getShare(share.id, 'bob').context.work[1].records[0].text = 'Changed' }, TypeError)
+  source.work.push({ turn: 3, records: [{ text: 'Later private work' }], omissions: [] })
+  const fork = await registry.acceptShare(share.id, 'bob', async () => ({ id: 'conv-new' }))
+  const request = inheritedWorkInput('Follow-up', fork.inheritedContext)
+  assert.equal(request[0].content[0].text, 'Follow-up')
+  const files = request[0].content.slice(1)
+  assert.deepEqual(files.map((file) => file.filename), ['inherited-work-index.txt', 'inherited-2-0.txt', 'inherited-2-1.md'])
+  const texts = files.map((file) => Buffer.from(file.file_data.split(',')[1], 'base64').toString())
+  assert.match(texts[0], /historical|missing attachments/)
+  assert.match(texts[1], /Exact original dataset/)
+  assert.equal(texts[2], '# Exact draft\n')
+  assert.doesNotMatch(texts.join(''), /Later private work|\/private\/|never-copy/)
+  assert.equal(fork.artifacts.size, 0)
+  assert.equal(fork.contextPending, true)
+  assert.deepEqual(fork.work[1].usage, { input_tokens: 12, output_tokens: 3, total_tokens: 15 })
+})
+
+test('source entitlement is independent of chat ownership and oversized work cannot fall back to text-only', async () => {
+  const registry = new SessionRegistry()
+  const source = await completedSession(registry)
+  source.work.push({ records: [{ kind: 'source', text: 'Private source' }], omissions: [] })
+  assert.throws(() => registry.createShare(source.id, 'alice', 'bob'), { status: 403 })
+  registry.contextRecipients.add('bob')
+  source.work.push({ records: [], omissions: [{ reason: 'capture_limit', blocking: true }] })
+  assert.throws(() => registry.createShare(source.id, 'alice', 'bob'), { status: 413 })
+  assert.equal(registry.shares.size, 0)
+  assert.equal(inheritedWorkInput('Exact question', { work: [] }), 'Exact question')
+})
+
+test('attachment limits reject whole packages rather than dropping supporting records', () => {
+  assert.throws(() => inheritedWorkInput('Question', { work: [{ turn: 1, records: Array.from({ length: 128 }, () => ({ kind: 'finding', text: 'result' })) }] }), { status: 413 })
+  assert.throws(() => inheritedWorkInput('Question', { work: [{ turn: 1, records: [{ kind: 'file', text: 'x'.repeat(10_000_000) }] }] }), { status: 413 })
+})
+
+test('published files are exact byte snapshots with new recipient download IDs and independent copies', async () => {
+  const registry = new SessionRegistry({ contextRecipients: ['bob'] })
+  const source = await completedSession(registry)
+  const bytes = Buffer.from('\uFEFF# Exact published bytes\n')
+  const artifact = { file_id: 'assistant-owner', filename: 'brief.md', bytes: bytes.length }
+  source.artifacts.set(artifact.file_id, artifact)
+  let reads = 0
+  const client = { files: { content: async (id) => { reads += 1; assert.equal(id, artifact.file_id); return new Response(bytes) } } }
+  assert.deepEqual(await readPublishedMarkdown(client, artifact), bytes)
+  await assert.rejects(readPublishedMarkdown(client, { ...artifact, bytes: 1 }), { status: 409 })
+  assert.throws(() => registry.createShare(source.id, 'alice', 'bob'), { status: 409 })
+  const preview = registry.contextPreview(source.id, 'alice')
+  const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
+  assert.deepEqual(Buffer.from(text), bytes)
+  const file = { source_id: artifact.file_id, filename: 'brief.md', bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), text }
+  assert.throws(() => registry.createShare(source.id, 'alice', 'bob', [{ ...file, sha256: 'incorrect' }]), { status: 409 })
+  const share = registry.createShare(source.id, 'alice', 'bob', [file])
+  source.artifacts.set('assistant-later', { ...artifact, file_id: 'assistant-later', filename: 'later.md' })
+  assert.notEqual(registry.contextPreview(source.id, 'alice').version, preview.version)
+  const fork = await registry.acceptShare(share.id, 'bob', async () => ({ id: 'conv-files-copy' }))
+  const copied = [...fork.artifacts.values()][0]
+  assert.notEqual(copied.file_id, artifact.file_id)
+  assert.equal(copied.inherited, true)
+  assert.deepEqual(await readPublishedMarkdown({}, copied), bytes)
+  assert.equal(reads, 2)
+  assert.throws(() => registry.artifact(fork.id, 'alice', copied.file_id), { status: 403 })
+  assert.throws(() => registry.artifact(fork.id, 'bob', artifact.file_id), { status: 404 })
+  assert.equal(fork.artifacts.size, 1)
+})
+
+test('revoking source-export policy blocks acceptance without importing a conversation', async () => {
+  const registry = new SessionRegistry({ contextRecipients: ['bob'] })
+  const source = await completedSession(registry)
+  source.work.push({ records: [{ kind: 'finding', text: 'Completed work' }], omissions: [] })
+  const share = registry.createShare(source.id, 'alice', 'bob')
+  registry.contextRecipients.delete('bob')
+  await assert.rejects(registry.acceptShare(share.id, 'bob', () => assert.fail('Must not import')), { status: 403 })
+  assert.equal(registry.shares.size, 1)
 })
 
 test('shares require the owner, a distinct recipient, and a completed idle turn', async () => {

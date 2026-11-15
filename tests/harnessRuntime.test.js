@@ -1,6 +1,63 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { createSnapshotConversation, runHarnessTurn } from '../server/harnessRuntime.js'
+import { captureCompletedWork, createSnapshotConversation, inheritedIndexWasRead, runHarnessTurn } from '../server/harnessRuntime.js'
+
+test('index-read evidence requires the actual index file and a successful matching native output', () => {
+  const output = [
+    { type: 'function_call', name: 'view', call_id: 'read', arguments: '{"path":"/workspace/inherited-work-index.txt"}' },
+    { type: 'function_call_output', call_id: 'read', output: '{"hash":"actual-hash"}' },
+  ]
+  assert.equal(inheritedIndexWasRead({ output }, 'actual-hash'), true)
+  assert.equal(inheritedIndexWasRead({ output }, 'wrong-hash'), false)
+  assert.equal(inheritedIndexWasRead({ output: [output[0], { ...output[1], status: 'failed' }] }, 'actual-hash'), false)
+  assert.equal(inheritedIndexWasRead({ output: [output[0], { ...output[1], output: '{"error":"actual-hash"}' }] }, 'actual-hash'), false)
+  assert.equal(inheritedIndexWasRead({ output: [{ ...output[0], arguments: '{"path":"/other.txt"}' }, output[1]] }, 'actual-hash'), false)
+})
+
+test('credential-like content blocks capture instead of being silently redacted or copied', () => {
+  const work = captureCompletedWork({ status: 'completed', output: [
+    { type: 'function_call', name: 'task', call_id: 'task' },
+    { type: 'function_call_output', call_id: 'task', output: '{"access_token":"PRIVATE"}' },
+    { type: 'message', content: [{ annotations: [{ type: 'url_citation', url: 'https://example.test/file?sig=PRIVATE' }] }] },
+  ] })
+  assert.equal(work.records.length, 0)
+  assert.equal(work.omissions.length, 2)
+  assert(work.omissions.every((entry) => entry.blocking))
+  assert.doesNotMatch(JSON.stringify(work), /PRIVATE/)
+})
+
+test('completed work preserves exact source and finding content beyond UI limits, never protected state', () => {
+  const text = 'Original data\n'.repeat(10_000)
+  const work = captureCompletedWork({ status: 'completed', usage: { input_tokens: 123, output_tokens: 45, total_tokens: 168, secret: 'excluded' }, output: [
+    { type: 'mcp_call', id: 'fabric-1', name: 'fabric-sales___DataAgent', status: 'completed', arguments: '{"userQuestion":"Original query","token":"SECRET"}',
+      output: JSON.stringify([{ type: 'text', text }]) },
+    { type: 'function_call', name: 'task', call_id: 'task-1', arguments: '{}' },
+    { type: 'function_call_output', call_id: 'task-1', output: text },
+    { type: 'reasoning', encrypted_content: 'SECRET' }, { type: 'mcp_approval_response', approve: true, approval_request_id: 'SECRET' },
+    { type: 'message', id: 'msg-1', content: [{ annotations: [{ type: 'url_citation', url: 'https://example.test/source', title: 'Source', start_index: 5, end_index: 12 }] }] },
+  ] })
+  assert.equal(work.records[0].text, text)
+  assert.equal(work.records[1].text, text)
+  assert.deepEqual(work.records[2], { kind: 'citation', message_id: 'msg-1', content_index: 0, url: 'https://example.test/source', title: 'Source', start_index: 5, end_index: 12 })
+  assert.deepEqual(work.usage, { input_tokens: 123, output_tokens: 45, total_tokens: 168 })
+  assert.equal(work.tool_calls, 2)
+  assert.doesNotMatch(JSON.stringify(work), /SECRET|approve|encrypted_content/)
+})
+
+test('completed work reports oversized outputs without truncation and sanitizes failures', () => {
+  const work = captureCompletedWork({ status: 'completed', output: [
+    { type: 'function_call', name: 'task', call_id: 'huge' },
+    { type: 'function_call_output', call_id: 'huge', output: 'x'.repeat(1_048_577) },
+    { type: 'mcp_call', id: 'failed', name: 'fabric-sales___DataAgent', status: 'failed', error: 'PRIVATE', output: 'PRIVATE' },
+    { type: 'function_call', name: 'shell', call_id: 'shell' },
+    { type: 'function_call_output', call_id: 'shell', output: 'PRIVATE' },
+  ] })
+  assert.equal(work.records.length, 1)
+  assert.equal(work.records[0].status, 'failed')
+  assert.deepEqual(work.omissions, [{ call_id: 'huge', reason: 'capture_limit', blocking: true }, { call_id: 'shell', reason: 'unsupported_tool_output' }])
+  assert.doesNotMatch(JSON.stringify(work), /PRIVATE/)
+  assert.throws(() => captureCompletedWork({ status: 'incomplete', output: [] }), /Only completed/)
+})
 
 test('snapshot creation copies exact visible text in bounded native item batches without inference', async () => {
   const messages = Array.from({ length: 22 }, (_, index) => ({ role: index % 2 ? 'assistant' : 'user', content: `Exact text ${index}\nSource date: unknown.` }))
@@ -78,6 +135,31 @@ function clientFor(outputs) {
     },
   }
 }
+
+test('native source diagnostics distinguish provider errors from evidence rejection without exposing messages', async () => {
+  const output = [
+    { type: 'mcp_call', id: 'fabric-timeout', name: 'fabric-sales___DataAgent', status: 'failed',
+      error: { code: 'upstream_timeout', status: 504, message: 'PRIVATE bearer credentials' }, output: 'PRIVATE' },
+    { type: 'mcp_call', id: 'product-auth', name: 'product-knowledge___knowledge_base_retrieve', status: 'failed',
+      error: JSON.stringify({ code: 'unauthorized', status_code: 401, message: 'PRIVATE' }), output: 'PRIVATE' },
+    { type: 'mcp_call', id: 'product-format', name: 'product-knowledge___knowledge_base_retrieve', status: 'completed', output: 'unrecognized' },
+    { type: 'mcp_call', id: 'product-empty', name: 'product-knowledge___knowledge_base_retrieve', status: 'completed', output: '[]' },
+    { type: 'mcp_call', id: 'fabric-unknown', name: 'fabric-sales___DataAgent', status: 'failed',
+      error: { code: 'PRIVATE', message: 'PRIVATE' }, output: '[]' },
+  ]
+  const events = []
+  await runHarnessTurn({ client: clientFor([output]), conversation: 'diagnostic-test', input: 'Research', emit: (event) => events.push(event) })
+  const diagnostics = events.filter((event) => event.type === 'harness.source').map((event) => event.result.diagnostic)
+  assert.deepEqual(diagnostics[0], { native_status: 'failed', reason: 'provider_error', provider_code: 'upstream_timeout', http_status: 504 })
+  assert.deepEqual(diagnostics[1], { native_status: 'failed', reason: 'provider_error', provider_code: 'unauthorized', http_status: 401 })
+  assert.equal(diagnostics[2].reason, 'unrecognized_output_format')
+  assert.equal(diagnostics[3].reason, 'no_verifiable_document_references')
+  assert.deepEqual(diagnostics[4], { native_status: 'failed', reason: 'provider_error' })
+  assert.doesNotMatch(JSON.stringify(events.filter((event) => event.type.startsWith('harness.'))), /PRIVATE/)
+  const work = captureCompletedWork({ status: 'completed', output })
+  assert.deepEqual(work.records.map((record) => record.diagnostic), diagnostics)
+  assert.doesNotMatch(JSON.stringify(work), /PRIVATE/)
+})
 
 test('revised canaries use supported request fields and stop on observed tool activity without continuation', async () => {
   const client = clientFor([[]])

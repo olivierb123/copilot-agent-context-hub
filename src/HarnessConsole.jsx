@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Activity, ArrowDownLeft, Database, Download, FileText, GitFork, Globe, Menu, MessageSquare, Plus, Search, Send, Share2, Square, X } from 'lucide-react'
 import { runHarnessQuery } from './agentClient.js'
 import { getAccessToken, isSignInConfigured } from './auth.js'
-import SessionSharing from './SessionSharing.jsx'
+import SessionSharing, { SharingDialog } from './SessionSharing.jsx'
 
 const TOOL_LABELS = { task: 'Delegate research', create: 'Write workspace file', view: 'Read workspace file',
   str_replace: 'Revise workspace file', web_fetch: 'Fetch web page', web_search_call: 'Web search',
@@ -23,11 +23,17 @@ const PROMPT_CAPABILITIES = {
 
 const SUGGESTED_PROMPTS = [
   { title: 'Quota performance', level: 'Simple', capabilities: ['sales'], subagents: 0, question: 'In original FieldForge FY26/Q1, which territory is furthest below quota in dollars, and which has the lowest attainment?' },
-  { title: 'Roadmap evidence', level: 'Simple', capabilities: ['knowledge'], subagents: 0, question: 'According to our product documentation, does FieldForge support weather-risk planning today, or is it still on the roadmap?' },
+  { title: 'Roadmap evidence', level: 'Simple', capabilities: ['knowledge'], subagents: 0, question: 'According to our product documentation, does FieldForge support weather-risk planning today, or is it still on the roadmap? Include the returned source passages, citations and original source dates; flag unknown dates.' },
   { title: 'External research', level: 'Intermediate', capabilities: ['webSearch', 'webFetch'], subagents: 0, question: 'What does OSHA say about preventing heat illness on construction sites, and what are employers required to do?' },
-  { title: 'Pipeline and definitions', level: 'Intermediate', capabilities: ['sales', 'knowledge'], subagents: 0, question: 'How many opportunities are open in the expanded synthetic demo, what is their total and probability-weighted value, and how do our internal forecasting definitions explain those numbers?' },
-  { title: 'Web-informed opportunities', level: 'Advanced', capabilities: ['sales', 'webSearch', 'webFetch'], subagents: 0, question: 'Which South opportunities in the expanded synthetic demo should we prioritize, and what discovery questions would official OSHA heat-exposure guidance suggest for those conversations?' },
-  { title: 'Complete territory brief', level: 'Advanced', capabilities: ['sales', 'knowledge', 'webSearch', 'webFetch', 'workspace', 'publish'], subagents: 0, question: 'Prepare a downloadable Markdown brief for South using the expanded synthetic demo. Cover sales performance, priority opportunities, relevant FieldForge capabilities and limitations, and official construction heat-exposure guidance. Recommend next actions and flag missing evidence.' },
+  { title: 'Pipeline and definitions', level: 'Intermediate', capabilities: ['sales', 'knowledge'], subagents: 0, question: 'How many opportunities are open in the expanded synthetic demo, what is their total and probability-weighted value, and how do our internal forecasting definitions explain those numbers? Preserve returned evidence, citations, source dates and the synthetic-data disclosure; distinguish missing evidence from conclusions.' },
+  { title: 'Web-informed opportunities', level: 'Advanced', capabilities: ['sales', 'webSearch', 'webFetch'], subagents: 1, question: 'Which South opportunities in the expanded synthetic demo should we prioritize? Delegate official OSHA heat-exposure research to one subagent if supported, and combine its completed findings with the returned sales evidence to recommend discovery questions. Include citations, original source dates and missing evidence. Do not treat synthetic data as live CRM.' },
+  { title: 'Reusable territory brief', level: 'Advanced', capabilities: ['sales', 'knowledge', 'webSearch', 'webFetch', 'workspace', 'publish'], subagents: 2, question: 'Prepare a reusable Markdown brief for South using the expanded synthetic sales data, FieldForge product documentation and official OSHA heat-exposure guidance. If supported, delegate product-document and OSHA research to separate subagents, then retain their completed findings. Cover performance, priority opportunities, capabilities, limitations and next actions. Include returned source passages, citations, original source dates and synthetic-data disclosures; flag unknown dates and missing evidence. Read back the completed Markdown and publish a downloadable file if supported. Do not claim publication without a successful tool result.' },
+]
+
+const INHERITED_PROMPTS = [
+  { title: 'Recall inherited evidence', level: 'Simple', capabilities: ['workspace'], subagents: 0, question: 'Read inherited-work-index.txt and the relevant inherited supporting files if available. Using only inherited completed work, list three established facts and their sources. Preserve original source dates and synthetic-data disclosures. Do not repeat source retrieval or research. If attachments or evidence are missing, say so rather than reconstructing them.' },
+  { title: 'Prioritize inherited findings', level: 'Intermediate', capabilities: ['workspace'], subagents: 0, question: 'Read inherited-work-index.txt and relevant supporting files if available. Turn the inherited South territory findings into a prioritized action list, with the inherited evidence and uncertainty behind each action. Do not repeat retrieval, delegation or research for evidence already included. Identify missing inherited material before proposing any new research; do not execute new research.' },
+  { title: 'Adapt the inherited brief', level: 'Advanced', capabilities: ['workspace', 'publish'], subagents: 0, question: 'Read inherited-work-index.txt and the relevant inherited brief, source results and completed findings if available. Adapt that completed work into a downloadable Markdown account-planning brief for South, including priorities, discovery questions, evidence and limitations. Preserve citations, original dates and synthetic-data disclosures. Do not repeat retrieval, delegation or analysis already completed. If essential inherited material is missing, report the gap before proceeding instead of running new research. Read back the revised Markdown and publish it if supported; distinguish an actual published file from a readback. Do not claim token savings.' },
 ]
 
 function safeUrl(value) {
@@ -70,7 +76,28 @@ function SourceResult({ result }) {
   )
 }
 
-function ConversationTurn({ turn, number, onInspect, onExport }) {
+function RunningProgress({ activity, lastActivity, hasText }) {
+  const [frame, setFrame] = useState(0)
+  useEffect(() => {
+    const timer = window.setInterval(() => setFrame(previous => (previous + 1) % 60), 180)
+    return () => window.clearInterval(timer)
+  }, [])
+  const active = activity.filter(item => ['in_progress', 'running', 'searching', 'queued'].includes(item.status))
+  const latest = active.find(item => item.id === lastActivity?.id) || active.at(-1) || lastActivity
+  const tool = latest && (TOOL_LABELS[latest.tool] || latest.tool.replaceAll('_', ' '))
+  const label = active.length ? `${tool} · ${active.length > 1 ? `${active.length} tools active` : latest.status === 'queued' ? 'queued' : 'running'}`
+    : hasText ? 'Receiving agent response'
+      : latest ? `${tool} · ${['failed', 'interrupted'].includes(latest.status) ? latest.status : latest.status === 'completed' ? 'finished' : 'observed'}; waiting for agent`
+        : 'Waiting for agent activity'
+  const filled = Math.floor(frame / 3) % 10 + 1
+  const spinner = ['/', '-', '|', '\\'][frame % 4]
+  return <div className="harness-progress flex h-5 min-w-0 items-center gap-3 text-xs text-emerald-300">
+    <span aria-hidden="true" className="w-[14ch] shrink-0 whitespace-pre font-mono text-white">{`[${'■'.repeat(filled)}${' '.repeat(10 - filled)}] ${spinner}`}</span>
+    <span role="status" aria-live="polite" aria-atomic="true" title={label} className="min-w-0 truncate">{label}</span>
+  </div>
+}
+
+function ConversationTurn({ turn, number, onInspect, onExport, onDownload, downloading, downloadDisabled }) {
   return (
     <article aria-label={`Turn ${number}`} className="space-y-5 border-b border-slate-800 pb-6 last:border-0">
       <div className="space-y-2 border-l-2 border-slate-600 pl-4">
@@ -85,6 +112,16 @@ function ConversationTurn({ turn, number, onInspect, onExport }) {
         </div>
         <div className="break-words whitespace-pre-wrap text-sm leading-7 text-slate-200">{turn.answer || (turn.status === 'running' ? 'Researching…' : 'No response returned.')}</div>
         {turn.error && <p className="text-sm text-red-300">{turn.error}</p>}
+        {turn.artifacts?.length > 0 && <section aria-label={`Files for turn ${number}`} className="response-files">
+          {turn.artifacts.map((artifact) => <div key={artifact.file_id} className="response-file">
+            <FileText size={18} className="shrink-0 text-emerald-200" />
+            <div className="min-w-0 flex-1"><p className="break-all text-sm text-slate-200">{artifact.filename}</p>
+              <p className="text-xs text-slate-500">{artifact.inherited ? 'Inherited snapshot' : 'Published artifact'} · {artifact.bytes} bytes</p></div>
+            <button type="button" title={`Download ${artifact.filename}`} aria-label={`Download ${artifact.filename}`}
+              disabled={downloadDisabled || Boolean(downloading)} onClick={() => onDownload(artifact)}
+              className="grid h-10 w-10 shrink-0 place-items-center rounded border border-slate-700 text-emerald-200"><Download size={17} /></button>
+          </div>)}
+        </section>}
         {turn.brief && <details className="border-t border-slate-800 pt-3 text-sm text-slate-400">
           <summary className="cursor-pointer">Workspace read-back</summary>
           <div className="mt-3 flex min-w-0 items-center justify-between gap-3">
@@ -155,6 +192,7 @@ function ConversationPane({ account, onSignIn, chatId, initialFork, onMetadata }
   const [status, setStatus] = useState('idle')
   const [calls, setCalls] = useState([])
   const [activity, setActivity] = useState([])
+  const [lastActivity, setLastActivity] = useState(null)
   const [evidence, setEvidence] = useState([])
   const [brief, setBrief] = useState(null)
   const [artifacts, setArtifacts] = useState([])
@@ -166,15 +204,26 @@ function ConversationPane({ account, onSignIn, chatId, initialFork, onMetadata }
   const [inherited, setInherited] = useState(false)
   const [sharingPending, setSharingPending] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
+  const [usage, setUsage] = useState(null)
+  const [contextStatus, setContextStatus] = useState(null)
   const controller = useRef(null)
   const generation = useRef(0)
   const transcript = useRef(null)
   const composer = useRef(null)
+  const promptCatalogue = useRef(null)
   const followLatest = useRef(true)
   const authenticated = Boolean(account) || LOCAL_MODE
   const busy = status === 'running' || status === 'resetting' || sharingPending
   const conversationEnded = Boolean(submitted) && status === 'error' && !sessionId
-  const inspected = inspectedTurn === null ? { activity, evidence, calls } : turns[inspectedTurn]
+  const inspected = inspectedTurn === null ? { activity, evidence, calls, usage } : turns[inspectedTurn]
+
+  useEffect(() => {
+    const viewport = window.matchMedia('(min-width: 1101px)')
+    const update = () => { if (promptCatalogue.current) promptCatalogue.current.open = viewport.matches }
+    update()
+    viewport.addEventListener('change', update)
+    return () => viewport.removeEventListener('change', update)
+  }, [])
 
   useEffect(() => {
     onMetadata(chatId, { title: (turns[0]?.question || submitted || (initialFork ? 'Forked chat' : 'New chat')).split('\n')[0].slice(0, 72), busy })
@@ -189,10 +238,31 @@ function ConversationPane({ account, onSignIn, chatId, initialFork, onMetadata }
   useEffect(() => {
     setSessionId(initialFork?.session_id || null)
     const imported = []
-    for (let index = 0; index < (initialFork?.messages.length || 0); index += 2) imported.push({ question: initialFork.messages[index].content,
-      answer: initialFork.messages[index + 1].content, inherited: true, status: 'done', activity: [], evidence: [], calls: [] })
+    for (let index = 0; index < (initialFork?.messages.length || 0); index += 2) {
+      const work = initialFork.context?.work?.find((turn) => turn.turn === index / 2 + 1)
+      const records = work?.records || []
+      imported.push({ question: initialFork.messages[index].content, answer: initialFork.messages[index + 1].content,
+        inherited: true, status: 'done', capturedAt: work?.captured_at,
+        artifacts: (initialFork.artifacts || []).filter((artifact) => {
+          const capturedTurn = initialFork.context?.work?.find((entry) => entry.records.some((record) => record.kind === 'file' && record.filename === artifact.filename))?.turn
+          return (capturedTurn || initialFork.messages.length / 2) === index / 2 + 1
+        }),
+        usage: work ? { ...work.usage, tool_calls: work.tool_calls } : null,
+        activity: records.filter((record) => record.kind !== 'citation').map((record, position) => ({
+          id: `inherited-${index}-${position}`, tool: record.tool || record.filename || record.kind,
+          status: record.status || 'returned', inherited: true, detail: record.query,
+          output: record.text || record.error || JSON.stringify(record.documents),
+        })),
+        evidence: records.filter((record) => record.kind === 'citation' && safeUrl(record.url))
+          .filter((record, position, all) => all.findIndex((entry) => entry.url === record.url) === position),
+        calls: records.filter((record) => record.kind === 'source').map((record, position) => ({
+          call_id: `inherited-source-${index}-${position}`, source: record.tool === 'product-knowledge' ? 'Foundry IQ' : 'Fabric IQ',
+          status: record.status === 'failed' ? 'error' : 'done', result: record,
+        })),
+      })
+    }
     setTurns(imported)
-    setInspectedTurn(null)
+    setInspectedTurn(imported.length ? imported.length - 1 : null)
     setSubmitted('')
     setQuestion('')
     setError('')
@@ -200,9 +270,12 @@ function ConversationPane({ account, onSignIn, chatId, initialFork, onMetadata }
     setAnswer('')
     setCalls([])
     setActivity([])
+    setLastActivity(null)
     setEvidence([])
     setBrief(null)
     setArtifacts([])
+    setUsage(null)
+    setContextStatus(initialFork?.context?.work?.some((turn) => turn.records.length) ? 'pending' : null)
     setStatus('idle')
     setInherited(false)
     setSharingPending(false)
@@ -220,7 +293,7 @@ function ConversationPane({ account, onSignIn, chatId, initialFork, onMetadata }
     const current = ++generation.current
     const input = question.trim()
     const active = () => current === generation.current
-    if (submitted) setTurns((previous) => [...previous, { question: submitted, answer, brief, status, error, activity, evidence, calls, inherited }])
+    if (submitted) setTurns((previous) => [...previous, { question: submitted, answer, brief, artifacts, status, error, activity, evidence, calls, inherited, usage }])
     setInherited(false)
     setQuestion('')
     setInspectedTurn(null)
@@ -229,9 +302,12 @@ function ConversationPane({ account, onSignIn, chatId, initialFork, onMetadata }
     setSubmitted(input)
     setAnswer('')
     setBrief(null)
+    setArtifacts([])
     setCalls([])
     setActivity([])
+    setLastActivity(null)
     setEvidence([])
+    setUsage(null)
     setError('')
     setStatus('running')
     try {
@@ -241,10 +317,13 @@ function ConversationPane({ account, onSignIn, chatId, initialFork, onMetadata }
         onEvent: (entry) => {
           if (!active()) return
           if (entry.type === 'harness.session') setSessionId(entry.session_id)
+          if (entry.type === 'harness.usage') setUsage({ ...entry.usage, tool_calls: entry.tool_calls })
+          if (entry.type === 'harness.context') setContextStatus(entry.status)
           if (entry.type === 'harness.source') {
             setCalls((previous) => [...previous.filter((call) => call.call_id !== entry.call_id), entry])
           }
           if (entry.type === 'harness.activity') {
+            setLastActivity(entry)
             setActivity((previous) => {
               const existing = previous.find((item) => item.id === entry.id)
               return existing ? previous.map((item) => item.id === entry.id ? { ...item, ...entry } : item)
@@ -315,6 +394,7 @@ function ConversationPane({ account, onSignIn, chatId, initialFork, onMetadata }
   }
 
   return (
+    <div className="conversation-layout">
     <section aria-label="Copilot Harness" className="conversation-surface flex min-w-0 flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-base font-semibold text-slate-100">{initialFork ? 'Forked conversation' : 'Conversation'}</h2>
@@ -322,17 +402,14 @@ function ConversationPane({ account, onSignIn, chatId, initialFork, onMetadata }
           <span className="min-w-0 break-all text-xs text-slate-500">{LOCAL_MODE ? 'Local developer identity' : account?.username || 'Signed out'} · Preview</span>
         </div>
       </div>
-      {status === 'running' && <p role="status" className="text-xs text-emerald-300">Researching…</p>}
+      {status === 'running' && <RunningProgress activity={activity} lastActivity={lastActivity} hasText={Boolean(answer)} />}
       {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
-      {artifacts.length > 0 && <section aria-label="Published files" className="divide-y divide-slate-800 border-y border-slate-800">
-        {artifacts.map((artifact) => <div key={artifact.file_id} className="flex min-w-0 flex-wrap items-center justify-between gap-3 py-3">
-          <div className="min-w-0"><p className="break-all text-sm text-slate-200">{artifact.filename}</p>
-            <p className="text-xs text-slate-500">Published artifact · {artifact.bytes} bytes</p></div>
-          <button type="button" title={`Download ${artifact.filename}`} aria-label={`Download ${artifact.filename}`}
-            disabled={busy || Boolean(downloading)} onClick={() => downloadArtifact(artifact)}
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-slate-700 text-emerald-200 disabled:opacity-40"><Download size={17} /></button>
-        </div>)}
-      </section>}
+      {contextStatus && <p role="status" className={`text-xs ${contextStatus === 'index_read' ? 'text-emerald-300' : 'text-amber-200'}`}>
+        {contextStatus === 'pending' ? 'Inherited work · attachment pending'
+          : contextStatus === 'index_read' ? 'Inherited index read · supporting-file staging not fully verified'
+            : contextStatus === 'attached_unverified' ? 'Inherited attachments submitted · staging unverified'
+              : 'Inherited work use unverified · no savings established'}
+      </p>}
       <div role="tablist" aria-label="Research views" className="flex flex-wrap gap-1 border-b border-slate-800">
         {[{ name: 'Conversation', Icon: MessageSquare }, { name: 'Activity', Icon: Activity }, { name: 'Evidence', Icon: Globe }].map(({ name, Icon }) => (
           <button key={name} type="button" role="tab" id={`tab-${chatId}-${name}`} aria-selected={view === name}
@@ -346,56 +423,30 @@ function ConversationPane({ account, onSignIn, chatId, initialFork, onMetadata }
         onScroll={(event) => { if (view === 'Conversation') { const panel = event.currentTarget; followLatest.current = panel.scrollHeight - panel.scrollTop - panel.clientHeight < 96 } }}
         className="min-h-32 min-w-0 flex-1 space-y-6 overflow-y-auto overscroll-contain pr-2">
         {view === 'Conversation' && <>
-          {!submitted && !turns.length && <section aria-label="Suggested prompts" className="chat-welcome">
-            <h3>Hi, how can I help?</h3>
-            <ul className="mt-6 grid gap-x-6 md:grid-cols-2">
-              {SUGGESTED_PROMPTS.slice(0, 4).map((prompt) => <li key={prompt.title} className="min-w-0">
-                <button type="button" title={`Use prompt: ${prompt.title}`} aria-label={`Use prompt: ${prompt.title}`}
-                  disabled={busy || !authenticated}
-                  onClick={() => { setQuestion(prompt.question); composer.current?.focus() }}
-                  className="flex w-full min-w-0 items-start gap-3 py-4 text-left text-slate-400 hover:text-emerald-200 focus-visible:outline focus-visible:outline-emerald-400 disabled:cursor-not-allowed">
-                  <span className="min-w-0 flex-1 break-words">
-                    <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                      <span className="text-sm font-medium text-slate-200">{prompt.title}</span>
-                    </span>
-                    <span hidden className="mt-2 flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
-                      <span>Expected:</span>
-                      {prompt.capabilities.map((capability) => {
-                        const { label, Icon } = PROMPT_CAPABILITIES[capability]
-                        return <span key={capability} title={`Expected tool: ${label}`} className="inline-flex items-center gap-1"><Icon size={12} className="shrink-0" />{label}</span>
-                      })}
-                    </span>
-                    <span hidden className="mt-1 items-center gap-1 text-[11px] text-slate-400"
-                      title="The agent chooses whether to delegate unless explicitly requested. Inspect Activity for actual calls.">
-                      <GitFork size={12} className="shrink-0" />
-                      {prompt.subagents ? `Up to ${prompt.subagents} subagents requested` : 'Subagents: agent decides'}
-                    </span>
-                    <span className="mt-1 block text-xs leading-5">{prompt.question}</span>
-                  </span>
-                  <ArrowDownLeft size={16} className="mt-1 shrink-0" />
-                </button>
-              </li>)}
-            </ul>
-          </section>}
+          {!submitted && !turns.length && <div className="chat-welcome"><h3>Hi, how can I help?</h3></div>}
           {turns.map((turn, index) => <ConversationTurn key={index} turn={turn} number={index + 1} onExport={exportBrief}
+            onDownload={downloadArtifact} downloading={downloading} downloadDisabled={busy || !sessionId}
             onInspect={() => { setInspectedTurn(index); setView('Activity') }} />)}
-          {submitted && <ConversationTurn turn={{ question: submitted, answer, brief, status, inherited }} number={turns.length + 1} onExport={exportBrief}
+          {submitted && <ConversationTurn turn={{ question: submitted, answer, brief, artifacts, status, inherited }} number={turns.length + 1} onExport={exportBrief}
+            onDownload={downloadArtifact} downloading={downloading} downloadDisabled={busy || !sessionId}
             onInspect={() => { setInspectedTurn(null); setView('Activity') }} />}
           {sessionId && (status === 'done' || (!submitted && turns.length > 0)) && <div className="response-share">
-            <button type="button" disabled={busy} onClick={() => setShareOpen(previous => !previous)} aria-expanded={shareOpen}
+            <button type="button" disabled={busy} onClick={() => setShareOpen(true)} aria-haspopup="dialog"
               title="Share completed conversation" className="share-action"><Share2 size={16} />Share with...</button>
-            {shareOpen && <div className="inline-sharing"><div className="flex justify-end"><button aria-label="Close sharing" title="Close sharing" onClick={() => setShareOpen(false)} disabled={sharingPending}><X size={16} /></button></div>
+            {shareOpen && <SharingDialog title="Share conversation" busy={sharingPending} onClose={() => setShareOpen(false)}>
               <SessionSharing account={account} sessionId={sessionId} busy={status === 'running'} mode="share" onPendingChange={setSharingPending} />
-            </div>}
+            </SharingDialog>}
           </div>}
         </>}
         {view === 'Activity' && <section aria-label="Harness activity">
+          {inspected.inherited && <p className="mb-3 text-xs text-amber-200">Inherited historical work · {inspected.capturedAt ? new Date(inspected.capturedAt).toLocaleString() : 'capture time unknown'}</p>}
+          {inspected.usage && <p className="mb-3 text-xs text-slate-400">Input {inspected.usage.input_tokens?.toLocaleString() ?? 'unknown'} · Output {inspected.usage.output_tokens?.toLocaleString() ?? 'unknown'} · Tool calls {inspected.usage.tool_calls ?? 'unknown'}</p>}
           <p className="mb-3 text-xs text-slate-500">{submitted ? `Turn ${inspectedTurn === null ? turns.length + 1 : inspectedTurn + 1}` : 'Current conversation'}</p>
           {!inspected.activity.length && <p className="text-sm text-slate-500">No native tool activity recorded.</p>}
           <ol className="divide-y divide-slate-800">{inspected.activity.map((item) => <li key={item.id} className="space-y-2 py-4">
             <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
               <span className="font-medium text-slate-200">{TOOL_LABELS[item.tool] || item.tool.replaceAll('_', ' ')}</span>
-              <span className={item.status === 'failed' || item.status === 'interrupted' ? 'text-red-300' : 'text-slate-500'}>{item.status.replaceAll('_', ' ')}</span>
+              <span className={item.status === 'failed' || item.status === 'interrupted' ? 'text-red-300' : 'text-slate-500'}>{item.status.replaceAll('_', ' ')}{item.inherited ? ' · inherited' : ''}</span>
             </div>
             {(item.detail || item.query) && <p className="break-all text-xs text-slate-400">{item.detail || item.query}</p>}
             {item.output && <details className="text-xs text-slate-400"><summary className="cursor-pointer">Tool result</summary>
@@ -430,5 +481,40 @@ function ConversationPane({ account, onSignIn, chatId, initialFork, onMetadata }
               className="px-3 text-sm text-emerald-300 disabled:opacity-40">Sign in</button>}
       </form>
     </section>
+    <aside aria-label="Suggested prompts" className="prompt-sidebar">
+      <details ref={promptCatalogue} open className="prompt-catalogue">
+        <summary>{initialFork ? 'Continue inherited research' : 'Sample prompts'}</summary>
+        <ul className="mt-3 divide-y divide-slate-800">
+              {(initialFork ? INHERITED_PROMPTS : SUGGESTED_PROMPTS).map((prompt) => <li key={prompt.title} className="min-w-0">
+                <button type="button" title={`Use prompt: ${prompt.title}`} aria-label={`Use prompt: ${prompt.title}`}
+                  disabled={busy || !authenticated}
+                  onClick={() => { setQuestion(prompt.question); composer.current?.focus() }}
+                  className="flex w-full min-w-0 items-start gap-3 py-4 text-left text-slate-400 hover:text-emerald-200 focus-visible:outline focus-visible:outline-emerald-400 disabled:cursor-not-allowed">
+                  <span className="min-w-0 flex-1 break-words">
+                    <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                      <span className="text-sm font-medium text-slate-200">{prompt.title}</span>
+                      <span className="text-[11px] text-slate-500">{prompt.level}</span>
+                    </span>
+                    <span hidden className="mt-2 flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+                      <span>Expected:</span>
+                      {prompt.capabilities.map((capability) => {
+                        const { label, Icon } = PROMPT_CAPABILITIES[capability]
+                        return <span key={capability} title={`Expected tool: ${label}`} className="inline-flex items-center gap-1"><Icon size={12} className="shrink-0" />{label}</span>
+                      })}
+                    </span>
+                    <span hidden className="mt-1 items-center gap-1 text-[11px] text-slate-400"
+                      title="The agent chooses whether to delegate unless explicitly requested. Inspect Activity for actual calls.">
+                      <GitFork size={12} className="shrink-0" />
+                      {prompt.subagents ? `Up to ${prompt.subagents} subagents requested` : 'Subagents: agent decides'}
+                    </span>
+                    <span className="mt-1 block text-xs leading-5">{prompt.question}</span>
+                  </span>
+                  <ArrowDownLeft size={16} className="mt-1 shrink-0" />
+                </button>
+              </li>)}
+            </ul>
+      </details>
+    </aside>
+    </div>
   )
 }

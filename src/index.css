@@ -25,7 +25,13 @@ button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2p
 .chat-main { display: flex; flex-direction: column; min-height: 0; }
 .chat-pane { flex: 1; min-height: 0; }
 .chat-pane[hidden] { display: none; }
-.conversation-surface { height: 100%; min-height: 0; max-width: 1040px; margin: auto; padding: 22px 32px 18px; }
+.conversation-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; height: 100%; min-height: 0; }
+.conversation-surface { height: 100%; min-height: 0; width: 100%; max-width: 1040px; margin: auto; padding: 22px 32px 18px; }
+.prompt-sidebar { min-width: 0; min-height: 0; overflow-y: auto; border-left: 1px solid var(--line); background: var(--sidebar); padding: 22px 18px; }
+.prompt-catalogue > summary { font-size: 14px; font-weight: 600; cursor: pointer; }
+.prompt-sidebar li button > span > span:last-child { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.response-files { display: flex; flex-direction: column; gap: 8px; }
+.response-file { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; max-width: 520px; }
 .chat-welcome { padding: 12vh 0 25px; max-width: 740px; margin: auto; }
 .chat-welcome h3 { font-size: 28px; font-weight: 400; }
 .chat-welcome li button { border-bottom: 1px solid #414141; }
@@ -33,13 +39,26 @@ button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2p
 .message-composer textarea { background: transparent; border: 0; resize: vertical; min-height: 58px; max-height: 180px; }
 .message-composer button { background: #3b3b3b; border-color: #606060; color: #eee; }
 .share-action { display: inline-flex; gap: 8px; align-items: center; color: #b9dacf; font-size: 13px; padding: 8px 0; }
-.inline-sharing { max-width: 540px; padding: 16px 0; border-top: 1px solid var(--line); }
+.sharing-dialog { position: fixed; margin: auto; width: min(760px, calc(100% - 32px)); max-height: calc(100dvh - 48px); padding: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); visibility: visible; overflow: hidden; }
+.sharing-dialog[open] { display: flex; flex-direction: column; }
+.sharing-dialog::backdrop { background: #000a; }
+.sharing-dialog-header { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); padding: 14px 20px; }
+.sharing-dialog-header h2 { font-size: 16px; font-weight: 600; }
+.sharing-dialog-header button { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 4px; }
+.sharing-dialog-header button:hover { background: #363636; }
+.sharing-dialog-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px; overflow-wrap: anywhere; }
 .app-shell .border-slate-800, .app-shell .border-slate-700 { border-color: var(--line); }
 .app-shell .bg-slate-900 { background: #303030; }
 .app-shell .text-slate-500 { color: #aaa; }
 .app-shell .text-slate-400 { color: #bbb; }
 .app-shell .text-emerald-300, .app-shell .text-emerald-200 { color: #b9dacf; }
+@media (max-width: 1100px) {
+	.conversation-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+	.prompt-sidebar { border-left: 0; border-top: 1px solid var(--line); padding: 10px 16px; max-height: 190px; }
+	.prompt-catalogue > ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px; }
+}
 @media (max-width: 700px) {
+	.sharing-dialog form > label { flex-basis: 100%; }
 	.chat-workspace { grid-template-columns: minmax(0, 1fr); }
 	.chat-sidebar { position: absolute; inset: 0 auto 0 0; width: min(280px, calc(100% - 44px)); padding: 14px; transform: translateX(-100%); visibility: hidden; z-index: 40; }
 	.sidebar-open .chat-sidebar { transform: none; visibility: visible; }
