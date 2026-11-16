@@ -1,5 +1,30 @@
 # Runtime Validation
 
+## 2026-11-16 Hackathon README And Illustrated Walkthrough
+
+The README now describes the submitted three-layer vision (private working context, proposed contributions and canonical shared context), the project-specific Microsoft 365 Copilot API constraint that led to a Foundry prototype, separate original/implemented architecture diagrams, the actual checkpoint-and-fork workflow, key implementation decisions and the remaining MVP gap. Structured extraction, semantic delta comparison, approved canonical merges, durable project versions and Microsoft 365/Graph/Purview integrations are explicitly not implemented. Snapshot version/hash binding is not presented as canonical project versioning.
+
+Required local gates were rerun in Context Hub under WSL Ubuntu on 2026-11-16. `npm test` exited 0: 72 total, 70 passed, 0 failed, 2 live tests skipped. Coverage exercised existing backend/client/data tests, including distinct principal ownership, recipient-bound consent and hash/version checks, frozen exact messages, eligible completed-work capture, byte-exact published Markdown copies, independent recipient download IDs, limits, protected content, revocation and import cleanup. `npm run lint` exited 0 with zero warnings/errors. `npm run build` exited 0 with its existing nonfatal greater-than-500-kB advisory (514.29 kB JavaScript chunk). These are offline checks, not new source-routing or native-staging evidence.
+
+An isolated Vite instance on loopback port 5196 loaded only React and Tailwind plugins, with `configFile: false` and `envDir: false`; no harness backend or local Azure configuration was loaded. The integrated browser intercepted authentication modules and harness API/SSE requests with synthetic owner/recipient identities and a fixed one-turn checkpoint. All source/file/assistant content was authored fixture material, including the displayed published-file entry. No live source retrieval, Foundry file upload, inference or actual permission transfer occurred.
+
+Browser assertions passed for:
+
+- Exact owner displayed assistant text; a response-scoped file control and sharing action.
+- Owner sharing disabled before consent; selection of `recipient@example.test`; POST carrying `recipient_object_id: recipient`, `consent_completed_work: true`, and `context_version: 1`.
+- Recipient invitation opening a native modal; exact assistant text and both message/work sections expanded automatically; acceptance disabled before explicit consent.
+- Acceptance carrying `accept_completed_work: true` and the precise synthetic reviewed hash.
+- Exact question/reply inheritance, inherited-file label and a new Forked chats entry while the original recipient chat remained present.
+- Recipient follow-up POST using `synthetic-recipient-session`, not the owner's session, with the displayed staging-unverified state retained. This verifies frontend handling of a fixture status, not attachment submission to or use by the native harness.
+
+Four inspected PNG assets are tracked under `docs/images/walkthrough-*.png` and embedded in the README. Final captures use the actual full-page layout at 1067 x 608, with no added illustration or fabricated provider evidence. The owner view is scrolled to its file/sharing controls; the recipient review view is at the top of a scrollable expanded package. An initial integrated-browser viewport mismatch caused intercepted clicks, waits and cropped draft captures. Repeating actions at the actual viewport and using full-page capture resolved the tooling issue; no application change was needed. Screenshot recapture replayed synthetic views, not an additional live test.
+
+The mandatory Foundry skill prerequisite script was attempted with Windows PowerShell. It exited 1 because Azure Developer CLI (`azd`) was not installed on Windows, reporting its installation URL. No installation, Foundry CLI workflow or cloud operation was attempted; this prerequisite is not required for the local frontend/offline checks above. No Docker or local Playwright npm dependency was needed for the available integrated-browser runner.
+
+These checks do not establish real Entra login/authorization, actual provider conversation creation, attachment staging/use, upstream recipient source ACLs, source freshness, routing success, production confidentiality, savings or canonical-context merge behavior. The separately approved 2026-11-14 live exact-message proof remains historical evidence only. The existing active Context Hub demo and sibling demos were not navigated, refreshed, restarted or redeployed. No environment/export-policy change, paid assistant inference, commit or push was performed.
+
+Final documentation checks passed: all eight README local links/assets resolve, four PNG signatures/dimensions match the inspected captures, both architecture blocks are present, editor diagnostics are clear and CRLF-aware `git diff --check` is clean. The synthetic browser page was cleared and its routes removed; the temporary frontend and screenshot artifact sink were stopped. The worktree contains only the two documentation edits and four screenshot assets, with no application-code changes.
+
 ## 2026-11-14 Accumulating Square Bar Activated
 
 The user changed the earlier deferral to "ok i want to test now". Before activation, the assistant disclosed the target-only restart, active-turn interruption and loss of memory-only session/share/download mappings. Port 5184's PID 606390 was verified in the Context Hub working directory, and only that server's terminal was stopped. The replacement preserves the existing loopback/watch-disabled configuration, bearer authentication, disabled local-persona mode, exact two-user allowlist, admin-only export policy, browser client, dedicated Foundry target and manual-testing setting; configuration assertions passed.
